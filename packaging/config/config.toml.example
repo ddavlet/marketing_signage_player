@@ -1,0 +1,11 @@
+# /etc/marketing-signage/config.toml
+# Written by the installer; the agent rewrites it atomically when device_key
+# is granted. Per-device settings (sync interval, screen schedule) are NOT
+# stored here — they come from the heartbeat response and live in memory.
+
+server_url     = "https://signage.example.com"
+device_key     = ""              # filled in after admin approves the device
+update_channel = "stable"        # "stable" or "beta"
+log_level      = "info"          # "debug" | "info" | "warn" | "error"
+chromium_path  = ""              # auto-detected if empty
+data_dir       = "/var/lib/marketing-signage"

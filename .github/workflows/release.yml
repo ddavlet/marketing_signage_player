@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          make build GOOS=$GOOS GOARCH=$GOARCH VER=$VERSION \
+            OUT=dist/marketing-signage-player-linux-${{ matrix.arch }}
+
+      - name: SHA256
+        run: sha256sum dist/marketing-signage-player-linux-${{ matrix.arch }} > dist/marketing-signage-player-linux-${{ matrix.arch }}.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: dist/
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+
+      - name: Register releases in control panel
+        env:
+          SIGNAGE_SERVER: ${{ secrets.SIGNAGE_SERVER_URL }}
+          SIGNAGE_TOKEN: ${{ secrets.SIGNAGE_API_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          strip_v() { echo "${1#v}"; }
+          VER="$(strip_v "$VERSION")"
+
+          for ARCH in amd64 arm64; do
+            BINARY="dist/marketing-signage-player-linux-${ARCH}"
+            SHA256="$(cat "${BINARY}.sha256" | awk '{print $1}')"
+            DOWNLOAD_URL="${SIGNAGE_SERVER}/static/player/marketing-signage-player-linux-${ARCH}"
+
+            curl -fsSL -X POST "${SIGNAGE_SERVER}/api/player/releases/" \
+              -H "Authorization: Token ${SIGNAGE_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"version\": \"${VER}\",
+                \"channel\": \"stable\",
+                \"os\": \"linux\",
+                \"arch\": \"${ARCH}\",
+                \"download_url\": \"${DOWNLOAD_URL}\",
+                \"sha256\": \"${SHA256}\",
+                \"is_active\": true
+              }"
+            echo "Registered ${VER} linux/${ARCH}"
+          done

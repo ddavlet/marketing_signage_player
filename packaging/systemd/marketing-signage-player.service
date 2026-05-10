@@ -1,0 +1,22 @@
+[Unit]
+Description=Marketing Signage Player Agent
+Documentation=https://signage.example.com/docs/player
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/marketing-signage-player --config /etc/marketing-signage/config.toml
+Restart=always
+RestartSec=5s
+
+# v1: agent runs as root so it can self-replace its own binary.
+# v2 will split out a tiny privileged updater helper and drop privileges here.
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/signage/.Xauthority
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,9 @@
+/bin/
+/dist/
+*.test
+*.out
+*.log
+.DS_Store
+.vscode/
+.idea/
+config.local.toml
