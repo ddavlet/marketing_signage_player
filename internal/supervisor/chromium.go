@@ -51,9 +51,19 @@ type Options struct {
 
 // Supervisor owns the Chromium subprocess lifecycle.
 type Supervisor struct {
-	opts    Options
-	mu      sync.Mutex
-	current *exec.Cmd
+	opts      Options
+	mu        sync.Mutex
+	current   *exec.Cmd
+	activeURL string // guarded by mu; may differ from opts.KioskURL after SwitchURL
+}
+
+// SwitchURL changes the URL Chromium will load on its next (re)start and
+// kills the current process so the supervisor loop relaunches immediately.
+func (s *Supervisor) SwitchURL(u string) error {
+	s.mu.Lock()
+	s.activeURL = u
+	s.mu.Unlock()
+	return s.KillCurrent()
 }
 
 // KillCurrent sends SIGINT to the running Chromium process so it exits and the
@@ -95,7 +105,7 @@ func New(opts Options) (*Supervisor, error) {
 	if opts.MaxBackoff == 0 {
 		opts.MaxBackoff = 60 * time.Second
 	}
-	return &Supervisor{opts: opts}, nil
+	return &Supervisor{opts: opts, activeURL: opts.KioskURL}, nil
 }
 
 // Run blocks until ctx is cancelled. It spawns Chromium, waits for it to
@@ -180,6 +190,10 @@ func (s *Supervisor) Run(ctx context.Context) error {
 // translate, no extensions. The user-data-dir is the one knob the
 // operator changes most often.
 func (s *Supervisor) buildArgs() []string {
+	s.mu.Lock()
+	u := s.activeURL
+	s.mu.Unlock()
+
 	args := []string{
 		// Kiosk basics
 		"--kiosk",
@@ -218,7 +232,7 @@ func (s *Supervisor) buildArgs() []string {
 		"--user-data-dir=" + s.opts.UserDataDir,
 	}
 	args = append(args, s.opts.ExtraArgs...)
-	args = append(args, s.opts.KioskURL)
+	args = append(args, u)
 	return args
 }
 

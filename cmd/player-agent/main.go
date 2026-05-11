@@ -31,6 +31,31 @@ import (
 	"github.com/marketing-signage/player/internal/updater"
 )
 
+// fallbackPageURL writes a minimal HTML page that shows the configured logo
+// image full-screen and returns its file:// URL. If no image is configured it
+// returns a data URI that renders a plain black screen.
+func fallbackPageURL(cfg config.Snapshot) string {
+	if cfg.FallbackImage == "" {
+		return "data:text/html,<html><body style=\"margin:0;background:black\"></body></html>"
+	}
+	if _, err := os.Stat(cfg.FallbackImage); err != nil {
+		return "data:text/html,<html><body style=\"margin:0;background:black\"></body></html>"
+	}
+	html := `<!DOCTYPE html><html><head><style>` +
+		`*{margin:0;padding:0}` +
+		`body{background:#000;display:flex;align-items:center;justify-content:center;height:100vh}` +
+		`img{max-width:100vw;max-height:100vh;object-fit:contain}` +
+		`</style></head><body>` +
+		`<img src="file://` + cfg.FallbackImage + `">` +
+		`</body></html>`
+
+	path := filepath.Join(cfg.DataDir, "fallback.html")
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err == nil {
+		_ = os.WriteFile(path, []byte(html), 0o644)
+	}
+	return "file://" + path
+}
+
 func main() {
 	configPath := flag.String("config", config.DefaultPath, "path to config.toml")
 	printHWID := flag.Bool("print-hwid", false, "print hardware ID and exit")
@@ -94,7 +119,8 @@ func run(configPath string) error {
 			return fmt.Errorf("pairing: %w", err)
 		}
 
-		sv := buildSupervisor(cfg, store.DeviceKey(), log)
+		kioskURL := strings.TrimRight(cfg.ServerURL, "/") + "/player/" + store.DeviceKey() + "/"
+		sv := buildSupervisor(cfg, kioskURL, log)
 		sched := scheduler.New(log)
 		upd := updater.New(updater.Options{
 			Releases: client,
@@ -111,12 +137,14 @@ func run(configPath string) error {
 		}
 
 		err := runtime.Run(ctx, runtime.Options{
-			Client:     client,
-			Supervisor: rtSupervisor,
-			Commander:  cmdr,
-			Scheduler:  sched,
-			Updater:    upd,
-			Log:        log.With(slog.String("subsystem", "runtime")),
+			Client:      client,
+			Supervisor:  rtSupervisor,
+			Commander:   cmdr,
+			Scheduler:   sched,
+			Updater:     upd,
+			Log:         log.With(slog.String("subsystem", "runtime")),
+			KioskURL:    kioskURL,
+			FallbackURL: fallbackPageURL(cfg),
 		})
 		if errors.Is(err, api.ErrUnauthorized) {
 			log.Warn("server returned unauthorized; clearing device_key and re-pairing")
@@ -129,11 +157,10 @@ func run(configPath string) error {
 	}
 }
 
-// buildSupervisor returns a Chromium supervisor pointed at /player/<key>/,
+// buildSupervisor returns a Chromium supervisor pointed at kioskURL,
 // or nil if no chromium binary is available on this host. The agent stays
 // useful as a heartbeat-only daemon in that case (e.g. dev workflow).
-func buildSupervisor(cfg config.Snapshot, deviceKey string, log *slog.Logger) *supervisor.Supervisor {
-	kioskURL := strings.TrimRight(cfg.ServerURL, "/") + "/player/" + deviceKey + "/"
+func buildSupervisor(cfg config.Snapshot, kioskURL string, log *slog.Logger) *supervisor.Supervisor {
 	dataDir := filepath.Join(cfg.DataDir, "chromium")
 
 	sv, err := supervisor.New(supervisor.Options{

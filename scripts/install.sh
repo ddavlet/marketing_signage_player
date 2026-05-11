@@ -2,9 +2,9 @@
 # install.sh — idempotent installer for the Marketing Signage Player agent.
 #
 # Usage (run as root):
-#   curl -sSf https://<server>/static/install.sh | sudo bash -s -- --server=https://<server>
+#   curl -sSf https://<server>/static/player/install.sh | sudo bash -s -- --server=https://<server>
 #
-# Requirements: Debian/Ubuntu with apt, systemd, an X server.
+# Requirements: Debian/Ubuntu with apt, systemd, an X server, python3.
 set -eu
 
 # ── argument parsing ────────────────────────────────────────────────────────
@@ -112,17 +112,47 @@ fi
 # ── 5. download binary ──────────────────────────────────────────────────────
 
 ARCH="$(detect_arch)"
-BINARY_URL="${SERVER_URL}/static/player/marketing-signage-player-linux-${ARCH}"
 
-log "Downloading player agent (linux/$ARCH)…"
+log "Fetching release info for linux/$ARCH (channel: $CHANNEL)…"
+RELEASE_JSON="$(curl -fsSL "${SERVER_URL}/api/player/releases/latest/?channel=${CHANNEL}&os=linux&arch=${ARCH}")"
+
+BINARY_URL="$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['download_url'])")"
+EXPECTED_SHA256="$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['sha256'])")"
+
+if [ -z "$BINARY_URL" ]; then
+  echo "Error: no release found for linux/$ARCH on channel '$CHANNEL'" >&2
+  exit 1
+fi
+
+log "Downloading player agent from $BINARY_URL…"
 curl -fsSL "$BINARY_URL" -o "${BINARY}.new"
 chmod 0755 "${BINARY}.new"
+
+ACTUAL_SHA256="$(sha256sum "${BINARY}.new" | awk '{print $1}')"
+if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+  echo "Error: SHA256 mismatch (got $ACTUAL_SHA256, expected $EXPECTED_SHA256)" >&2
+  rm -f "${BINARY}.new"
+  exit 1
+fi
+
 mv "${BINARY}.new" "$BINARY"
 log "Installed: $BINARY"
 
 # ── 6. config ───────────────────────────────────────────────────────────────
 
 mkdir -p "$CONFIG_DIR"
+
+# Download fallback image (shown when the server is unreachable).
+FALLBACK_IMAGE="${CONFIG_DIR}/fallback.png"
+FALLBACK_IMAGE_URL="${SERVER_URL}/static/player/fallback.png"
+log "Downloading fallback image…"
+if curl -fsSL "$FALLBACK_IMAGE_URL" -o "$FALLBACK_IMAGE" 2>/dev/null; then
+  log "Fallback image saved to $FALLBACK_IMAGE"
+else
+  log "No fallback image found on server — plain black screen will be used."
+  FALLBACK_IMAGE=""
+fi
+
 if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
   log "Writing initial config…"
   cat > "${CONFIG_DIR}/config.toml" <<EOF
@@ -132,6 +162,7 @@ update_channel = "${CHANNEL}"
 log_level      = "info"
 chromium_path  = ""
 data_dir       = "${DATA_DIR}"
+fallback_image = "${FALLBACK_IMAGE}"
 EOF
   chmod 0640 "${CONFIG_DIR}/config.toml"
 else

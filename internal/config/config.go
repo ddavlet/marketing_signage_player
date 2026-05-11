@@ -21,6 +21,10 @@ type Snapshot struct {
 	LogLevel      string `toml:"log_level"`
 	ChromiumPath  string `toml:"chromium_path"`
 	DataDir       string `toml:"data_dir"`
+	// FallbackImage is an absolute path to a local image file (PNG/JPG/SVG)
+	// shown full-screen when the server returns 401 or 404. Leave empty to
+	// show a plain black screen on server errors.
+	FallbackImage string `toml:"fallback_image"`
 }
 
 // Store wraps a Snapshot with atomic load/save and concurrent access.

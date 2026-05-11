@@ -33,6 +33,7 @@ type ScheduleUpdater interface {
 // restart Chromium in response to a panel command without importing supervisor.
 type Commander interface {
 	KillCurrent() error
+	SwitchURL(string) error
 }
 
 type Options struct {
@@ -43,6 +44,8 @@ type Options struct {
 	Updater         Subsystem
 	Log             *slog.Logger
 	DefaultInterval time.Duration
+	KioskURL        string // original kiosk URL to restore after fallback
+	FallbackURL     string // shown when server returns 401/404; empty disables
 }
 
 // Run blocks until ctx is cancelled or a subsystem returns a fatal error
@@ -140,6 +143,9 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 		interval = 60 * time.Second
 	}
 
+	canFallback := opts.Commander != nil && opts.FallbackURL != ""
+	inFallback := false
+
 	for {
 		resp, err := opts.Client.Heartbeat(ctx)
 		switch {
@@ -162,10 +168,29 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 			opts.Log.Debug("heartbeat ok",
 				slog.Int("playlist_version", resp.PlaylistVersion),
 				slog.String("update_channel", resp.UpdateChannel))
+			if inFallback {
+				inFallback = false
+				opts.Log.Info("server recovered; restoring kiosk")
+				if err := opts.Commander.SwitchURL(opts.KioskURL); err != nil {
+					opts.Log.Warn("switch back to kiosk failed", slog.String("error", err.Error()))
+				}
+			}
 
-		case errors.Is(err, api.ErrUnauthorized):
-			// Surface up so the caller can drop the key and re-pair.
-			return err
+		case errors.Is(err, api.ErrUnauthorized), errors.Is(err, api.ErrNotFound):
+			if canFallback {
+				if !inFallback {
+					inFallback = true
+					opts.Log.Warn("server unavailable; switching to fallback",
+						slog.String("error", err.Error()))
+					if serr := opts.Commander.SwitchURL(opts.FallbackURL); serr != nil {
+						opts.Log.Warn("switch to fallback failed", slog.String("error", serr.Error()))
+					}
+				}
+			} else if errors.Is(err, api.ErrUnauthorized) {
+				return err // no fallback: surface up so caller can re-pair
+			} else {
+				opts.Log.Warn("heartbeat failed", slog.String("error", err.Error()))
+			}
 
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			return err
