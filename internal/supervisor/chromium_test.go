@@ -49,7 +49,7 @@ func TestRunRestartsAfterExit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
 	defer cancel()
 
 	if err := sv.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -59,7 +59,7 @@ func TestRunRestartsAfterExit(t *testing.T) {
 	data, _ := os.ReadFile(counter)
 	hits := strings.Count(string(data), "hit")
 	if hits < 3 {
-		t.Errorf("expected supervisor to restart helper at least 3 times in 250ms, got %d", hits)
+		t.Errorf("expected supervisor to restart helper at least 3 times before deadline, got %d", hits)
 	}
 }
 

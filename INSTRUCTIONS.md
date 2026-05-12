@@ -194,7 +194,7 @@ Expected output after approval:
 | ---------------------- | ----------------------------------------------------------- |
 | **Sync interval**      | How often the agent heartbeats, in seconds (default 60)     |
 | **Update channel**     | `stable` or `beta`                                          |
-| **Screen on/off time** | DPMS schedule, e.g. 07:00–23:00. Leave blank for always on. |
+| **Screen on/off time** | Daily on/off window, e.g. 07:00–23:00 (switches kiosk vs black page in Chromium). Leave blank for always on. |
 | **Timezone**           | IANA timezone for the screen schedule, e.g. `Asia/Tashkent` |
 
 

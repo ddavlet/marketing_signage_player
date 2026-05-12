@@ -125,7 +125,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		args := s.buildArgs()
 		s.opts.Log.Info("starting chromium",
 			slog.String("binary", s.opts.BinaryPath),
-			slog.String("url", s.opts.KioskURL))
+			slog.String("url", args[len(args)-1]))
 
 		cmd := exec.CommandContext(ctx, s.opts.BinaryPath, args...)
 		cmd.Env = os.Environ()

@@ -3,9 +3,7 @@
 // heartbeat loop; the ticker applies it every 30 s.
 //
 // When a Commander is wired in (via WithCommander), the scheduler switches
-// Chromium to a black screen instead of relying solely on DPMS — this works
-// on monitors/TVs that ignore DPMS signals. DPMS is still attempted as a
-// secondary action for monitors that do support it.
+// Chromium between the kiosk URL and a plain black data: HTML page.
 package scheduler
 
 import (
@@ -22,7 +20,7 @@ import (
 const blackScreenURL = "data:text/html,<html><body style=\"margin:0;background:black\"></body></html>"
 
 // Commander is satisfied by *supervisor.Supervisor. When set, the scheduler
-// switches the Chromium URL instead of (or in addition to) using DPMS.
+// switches the Chromium URL for on/off.
 type Commander interface {
 	SwitchURL(string) error
 }
@@ -48,7 +46,7 @@ func New(log *slog.Logger) *Scheduler {
 
 // WithCommander wires a Chromium supervisor into the scheduler. When set,
 // schedule transitions switch the Chromium URL to a black screen (off) or
-// back to kioskURL (on) instead of relying solely on DPMS.
+// back to kioskURL (on).
 func (s *Scheduler) WithCommander(c Commander, kioskURL string) {
 	s.commander = c
 	s.kioskURL = kioskURL
@@ -62,7 +60,7 @@ func (s *Scheduler) Update(sched api.ScreenSchedule) {
 	s.mu.Unlock()
 }
 
-// Run ticks every 30 s and applies DPMS on/off. It satisfies runtime.Subsystem.
+// Run ticks every 30 s and applies the schedule. It satisfies runtime.Subsystem.
 func (s *Scheduler) Run(ctx context.Context) error {
 	s.apply()
 	tick := time.NewTicker(30 * time.Second)
@@ -89,8 +87,6 @@ func (s *Scheduler) apply() {
 	v := on
 	s.lastOn = &v
 
-	// Switch Chromium to black screen / kiosk URL when a supervisor is wired in.
-	// This works regardless of whether the monitor honours DPMS.
 	if s.commander != nil {
 		url := s.kioskURL
 		if !on {
@@ -100,11 +96,6 @@ func (s *Scheduler) apply() {
 			s.log.Warn("schedule URL switch failed", slog.Bool("want_on", on), slog.String("error", err.Error()))
 			return
 		}
-	}
-
-	// Also attempt DPMS for monitors that support it (power saving).
-	if err := setDisplay(on); err != nil {
-		s.log.Warn("DPMS command failed", slog.Bool("want_on", on), slog.String("error", err.Error()))
 	}
 
 	s.log.Info("display toggled", slog.Bool("on", on))
