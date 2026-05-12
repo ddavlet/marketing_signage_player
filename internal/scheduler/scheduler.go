@@ -1,6 +1,11 @@
-// Package scheduler applies DPMS on/off based on a screen schedule pushed
+// Package scheduler applies screen on/off based on a screen schedule pushed
 // from the server heartbeat. The schedule is updated concurrently by the
 // heartbeat loop; the ticker applies it every 30 s.
+//
+// When a Commander is wired in (via WithCommander), the scheduler switches
+// Chromium to a black screen instead of relying solely on DPMS — this works
+// on monitors/TVs that ignore DPMS signals. DPMS is still attempted as a
+// secondary action for monitors that do support it.
 package scheduler
 
 import (
@@ -12,12 +17,25 @@ import (
 	"github.com/marketing-signage/player/internal/api"
 )
 
-// Scheduler holds the current screen schedule and drives DPMS.
+// blackScreenURL is loaded into Chromium when the schedule says the screen
+// should be off. It renders a plain black page with no content.
+const blackScreenURL = "data:text/html,<html><body style=\"margin:0;background:black\"></body></html>"
+
+// Commander is satisfied by *supervisor.Supervisor. When set, the scheduler
+// switches the Chromium URL instead of (or in addition to) using DPMS.
+type Commander interface {
+	SwitchURL(string) error
+}
+
+// Scheduler holds the current screen schedule and drives the display on/off.
 type Scheduler struct {
 	log      *slog.Logger
 	mu       sync.RWMutex
 	schedule api.ScreenSchedule
 	lastOn   *bool // last applied state; nil = unknown
+
+	commander Commander
+	kioskURL  string
 }
 
 // New returns a Scheduler. If log is nil, slog.Default() is used.
@@ -26,6 +44,14 @@ func New(log *slog.Logger) *Scheduler {
 		log = slog.Default()
 	}
 	return &Scheduler{log: log.With("subsystem", "scheduler")}
+}
+
+// WithCommander wires a Chromium supervisor into the scheduler. When set,
+// schedule transitions switch the Chromium URL to a black screen (off) or
+// back to kioskURL (on) instead of relying solely on DPMS.
+func (s *Scheduler) WithCommander(c Commander, kioskURL string) {
+	s.commander = c
+	s.kioskURL = kioskURL
 }
 
 // Update is called by the heartbeat loop on every successful response.
@@ -63,10 +89,24 @@ func (s *Scheduler) apply() {
 	v := on
 	s.lastOn = &v
 
+	// Switch Chromium to black screen / kiosk URL when a supervisor is wired in.
+	// This works regardless of whether the monitor honours DPMS.
+	if s.commander != nil {
+		url := s.kioskURL
+		if !on {
+			url = blackScreenURL
+		}
+		if err := s.commander.SwitchURL(url); err != nil {
+			s.log.Warn("schedule URL switch failed", slog.Bool("want_on", on), slog.String("error", err.Error()))
+			return
+		}
+	}
+
+	// Also attempt DPMS for monitors that support it (power saving).
 	if err := setDisplay(on); err != nil {
 		s.log.Warn("DPMS command failed", slog.Bool("want_on", on), slog.String("error", err.Error()))
-		return
 	}
+
 	s.log.Info("display toggled", slog.Bool("on", on))
 }
 
