@@ -3,6 +3,7 @@
 ## Overview
 
 The player agent is a background service that runs on Debian 13 devices. It:
+
 - Opens Chromium in kiosk mode pointed at the control panel's player page
 - Registers itself on first boot and waits for admin approval
 - Receives playlist, sync interval, and screen schedule settings from the panel
@@ -16,6 +17,7 @@ All content management (playlists, media, schedules) is done from the control pa
 ## Requirements
 
 **Device:**
+
 - Debian 13 (Bookworm) or later
 - x86-64 or ARM64 CPU
 - 1 GB RAM minimum
@@ -23,6 +25,7 @@ All content management (playlists, media, schedules) is done from the control pa
 - Internet access to the control panel
 
 **Server:**
+
 - Control panel running and reachable from the device
 - Admin account on the panel
 
@@ -40,6 +43,7 @@ make release-all VER=v1.0.0
 ```
 
 This produces:
+
 ```
 dist/
 ├── marketing-signage-player-linux-amd64
@@ -146,6 +150,7 @@ After the agent starts it registers itself and waits for approval.
 5. Click **Submit**
 
 The agent polls every 30 seconds. Within 30 seconds of approval it will:
+
 - Persist the device key to config
 - Launch Chromium in kiosk mode
 - Start sending heartbeats
@@ -163,6 +168,7 @@ sudo journalctl -u marketing-signage-player -f
 ```
 
 Expected output after approval:
+
 ```
 {"msg":"device approved and paired"}
 {"msg":"chromium supervisor ready","kiosk_url":"https://signage.example.com/player/.../"}
@@ -183,16 +189,19 @@ Expected output after approval:
 
 ### Device settings (Devices → select device)
 
-| Setting | Description |
-|---|---|
-| **Sync interval** | How often the agent heartbeats, in seconds (default 60) |
-| **Update channel** | `stable` or `beta` |
+
+| Setting                | Description                                                 |
+| ---------------------- | ----------------------------------------------------------- |
+| **Sync interval**      | How often the agent heartbeats, in seconds (default 60)     |
+| **Update channel**     | `stable` or `beta`                                          |
 | **Screen on/off time** | DPMS schedule, e.g. 07:00–23:00. Leave blank for always on. |
-| **Timezone** | IANA timezone for the screen schedule, e.g. `Asia/Tashkent` |
+| **Timezone**           | IANA timezone for the screen schedule, e.g. `Asia/Tashkent` |
+
 
 ### Remote commands
 
 From the device detail page you can send:
+
 - **Restart Chromium** — kills and relaunches the browser without rebooting
 - **Reboot** — reboots the device via systemd
 
@@ -266,11 +275,14 @@ sudo systemctl daemon-reload
 
 `/etc/marketing-signage/config.toml`
 
-| Key | Default | Description |
-|---|---|---|
-| `server_url` | — | Control panel base URL (required) |
-| `device_key` | `""` | Filled automatically after approval — do not edit |
-| `update_channel` | `"stable"` | Release channel: `stable` or `beta` |
-| `log_level` | `"info"` | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `chromium_path` | `""` | Override Chromium binary path; auto-detected if empty |
-| `data_dir` | `"/var/lib/marketing-signage"` | Directory for Chromium profile and cache |
+
+| Key              | Default                        | Description                                           |
+| ---------------- | ------------------------------ | ----------------------------------------------------- |
+| `server_url`     | —                              | Control panel base URL (required)                     |
+| `device_key`     | `""`                           | Filled automatically after approval — do not edit     |
+| `update_channel` | `"stable"`                     | Release channel: `stable` or `beta`                   |
+| `log_level`      | `"info"`                       | Log verbosity: `debug`, `info`, `warn`, `error`       |
+| `chromium_path`  | `""`                           | Override Chromium binary path; auto-detected if empty |
+| `data_dir`       | `"/var/lib/marketing-signage"` | Directory for Chromium profile and cache              |
+
+
