@@ -15,6 +15,7 @@ import (
 var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrNotFound     = errors.New("not found")
+	ErrHTTPError    = errors.New("http error") // wraps any 4xx/5xx not handled specifically
 )
 
 // KeyProvider is a function so the client can read the latest device key
@@ -104,7 +105,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return ErrNotFound
 	case resp.StatusCode >= 400:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, string(b))
+		return fmt.Errorf("%s %s: status %d: %s: %w", method, path, resp.StatusCode, string(b), ErrHTTPError)
 	}
 
 	if out != nil {

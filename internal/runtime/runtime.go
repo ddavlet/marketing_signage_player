@@ -176,7 +176,7 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 				}
 			}
 
-		case errors.Is(err, api.ErrUnauthorized), errors.Is(err, api.ErrNotFound):
+		case errors.Is(err, api.ErrUnauthorized), errors.Is(err, api.ErrNotFound), errors.Is(err, api.ErrHTTPError):
 			if canFallback {
 				if !inFallback {
 					inFallback = true
@@ -185,6 +185,8 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 					if serr := opts.Commander.SwitchURL(opts.FallbackURL); serr != nil {
 						opts.Log.Warn("switch to fallback failed", slog.String("error", serr.Error()))
 					}
+				} else {
+					opts.Log.Warn("heartbeat failed (in fallback)", slog.String("error", err.Error()))
 				}
 			} else if errors.Is(err, api.ErrUnauthorized) {
 				return err // no fallback: surface up so caller can re-pair
