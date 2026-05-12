@@ -137,9 +137,6 @@ func run(configPath string) error {
 		kioskURL := strings.TrimRight(cfg.ServerURL, "/") + "/player/" + store.DeviceKey() + "/"
 		sv := buildSupervisor(cfg, kioskURL, log)
 		sched := scheduler.New(log)
-		if sv != nil {
-			sched.WithCommander(sv, kioskURL)
-		}
 		upd := updater.New(updater.Options{
 			Releases: client,
 			Channel:  func() string { return store.Get().UpdateChannel },

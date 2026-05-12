@@ -1,9 +1,9 @@
 // Package scheduler applies screen on/off based on a screen schedule pushed
 // from the server heartbeat. The schedule is updated concurrently by the
-// heartbeat loop; the ticker applies it every 30 s.
+// heartbeat loop; the ticker logs transitions every 30 s.
 //
-// When a Commander is wired in (via WithCommander), the scheduler switches
-// Chromium between the kiosk URL and a plain black data: HTML page.
+// The black screen itself is handled by the player page JS, which reads
+// screen_schedule from the sync response and clears the slide div when off.
 package scheduler
 
 import (
@@ -15,25 +15,12 @@ import (
 	"github.com/marketing-signage/player/internal/api"
 )
 
-// blackScreenURL is loaded into Chromium when the schedule says the screen
-// should be off. It renders a plain black page with no content.
-const blackScreenURL = "data:text/html,<html><body style=\"margin:0;background:black\"></body></html>"
-
-// Commander is satisfied by *supervisor.Supervisor. When set, the scheduler
-// switches the Chromium URL for on/off.
-type Commander interface {
-	SwitchURL(string) error
-}
-
-// Scheduler holds the current screen schedule and drives the display on/off.
+// Scheduler holds the current screen schedule and logs display on/off transitions.
 type Scheduler struct {
 	log      *slog.Logger
 	mu       sync.RWMutex
 	schedule api.ScreenSchedule
 	lastOn   *bool // last applied state; nil = unknown
-
-	commander Commander
-	kioskURL  string
 }
 
 // New returns a Scheduler. If log is nil, slog.Default() is used.
@@ -42,14 +29,6 @@ func New(log *slog.Logger) *Scheduler {
 		log = slog.Default()
 	}
 	return &Scheduler{log: log.With("subsystem", "scheduler")}
-}
-
-// WithCommander wires a Chromium supervisor into the scheduler. When set,
-// schedule transitions switch the Chromium URL to a black screen (off) or
-// back to kioskURL (on).
-func (s *Scheduler) WithCommander(c Commander, kioskURL string) {
-	s.commander = c
-	s.kioskURL = kioskURL
 }
 
 // Update is called by the heartbeat loop on every successful response.
@@ -86,17 +65,6 @@ func (s *Scheduler) apply() {
 	}
 	v := on
 	s.lastOn = &v
-
-	if s.commander != nil {
-		url := s.kioskURL
-		if !on {
-			url = blackScreenURL
-		}
-		if err := s.commander.SwitchURL(url); err != nil {
-			s.log.Warn("schedule URL switch failed", slog.Bool("want_on", on), slog.String("error", err.Error()))
-			return
-		}
-	}
 
 	s.log.Info("display toggled", slog.Bool("on", on))
 }
