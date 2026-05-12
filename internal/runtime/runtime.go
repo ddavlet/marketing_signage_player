@@ -188,10 +188,11 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 				slog.Int("playlist_version", resp.PlaylistVersion),
 				slog.String("update_channel", resp.UpdateChannel))
 			if inFallback {
-				inFallback = false
 				opts.Log.Info("server recovered; restoring kiosk")
 				if err := opts.Commander.SwitchURL(opts.KioskURL); err != nil {
 					opts.Log.Warn("switch back to kiosk failed", slog.String("error", err.Error()))
+				} else {
+					inFallback = false
 				}
 			}
 

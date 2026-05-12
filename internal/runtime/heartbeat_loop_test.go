@@ -14,6 +14,26 @@ import (
 	"github.com/marketing-signage/player/internal/api"
 )
 
+// failingCommander fails SwitchURL for the first failCount calls, then succeeds.
+type failingCommander struct {
+	recordingCommander
+	mu        sync.Mutex
+	failCount int
+}
+
+func (f *failingCommander) SwitchURL(u string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recordingCommander.mu.Lock()
+	f.recordingCommander.got = append(f.recordingCommander.got, u)
+	f.recordingCommander.mu.Unlock()
+	if f.failCount > 0 {
+		f.failCount--
+		return errors.New("switch failed")
+	}
+	return nil
+}
+
 type recordingCommander struct {
 	mu  sync.Mutex
 	got []string
@@ -399,5 +419,68 @@ func TestHeartbeatAfterDecodeErrorSecond503_NoFallback(t *testing.T) {
 		if u == fallback {
 			t.Fatalf("503 on second heartbeat must not open fallback after non-connectivity first error; got %v", cmd.urls())
 		}
+	}
+}
+
+// If SwitchURL(kiosk) fails during fallback recovery, inFallback must stay
+// true so the next successful heartbeat retries the switch.
+func TestHeartbeatRecovery_RetriesKioskSwitchIfFirstFails(t *testing.T) {
+	t.Parallel()
+
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/device/heartbeat/" {
+			http.NotFound(w, req)
+			return
+		}
+		n++
+		if n == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("down"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cli, err := api.New(api.Options{
+		BaseURL:   srv.URL,
+		DeviceKey: func() string { return "k" },
+		Timeout:   2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// failCount: 2 — first call is SwitchURL(fallback), second is SwitchURL(kiosk)
+	// recovery attempt. Both fail; third call (kiosk retry) must succeed.
+	cmd := &failingCommander{failCount: 2}
+	kiosk := "https://panel.example/player/x/"
+	fallback := "file:///tmp/fb.html"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	_ = heartbeatLoop(ctx, Options{
+		Client:          cli,
+		Commander:       cmd,
+		Log:             quietLog(),
+		DefaultInterval: 20 * time.Millisecond,
+		KioskURL:        kiosk,
+		FallbackURL:     fallback,
+	})
+
+	got := cmd.urls()
+	// Expected sequence: fallback, kiosk (failed), kiosk (succeeded), ...
+	// At minimum we expect the kiosk URL to appear at least twice.
+	var kioskCount int
+	for _, u := range got {
+		if u == kiosk {
+			kioskCount++
+		}
+	}
+	if kioskCount < 2 {
+		t.Errorf("expected kiosk SwitchURL to be retried (at least 2 calls), got %d; all: %v", kioskCount, got)
 	}
 }
