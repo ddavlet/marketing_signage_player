@@ -11,6 +11,7 @@ type RegisterRequest struct {
 	Hostname      string          `json:"hostname"`
 	OSInfo        json.RawMessage `json:"os_info"`
 	PlayerVersion string          `json:"player_version"`
+	SSHPort       int             `json:"ssh_port,omitempty"`
 }
 
 // RegisterResponse is "pending" until an admin approves the device,

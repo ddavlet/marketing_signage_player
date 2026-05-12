@@ -97,6 +97,7 @@ func run(configPath string) error {
 
 	osInfo := system.ReadOSInfo()
 	osInfoJSON, _ := json.Marshal(osInfo)
+	sshPort := system.DetectSSHTunnelPort()
 	log.Info("marketing-signage-player starting",
 		slog.String("version", system.Version),
 		slog.String("server_url", cfg.ServerURL),
@@ -105,12 +106,14 @@ func run(configPath string) error {
 		slog.String("hardware_id", identity.HardwareID()),
 		slog.String("hostname", identity.Hostname()),
 		slog.String("os_info", string(osInfoJSON)),
+		slog.Int("ssh_tunnel_port", sshPort),
 	)
 
 	client, err := api.New(api.Options{
 		BaseURL:   cfg.ServerURL,
 		DeviceKey: store.DeviceKey,
 		Version:   system.Version,
+		SSHPort:   sshPort,
 	})
 	if err != nil {
 		return fmt.Errorf("build api client: %w", err)
@@ -120,9 +123,10 @@ func run(configPath string) error {
 	defer stop()
 
 	pairer := &identity.Pairer{
-		Client: client,
-		Store:  store,
-		Log:    log.With(slog.String("subsystem", "identity")),
+		Client:  client,
+		Store:   store,
+		Log:     log.With(slog.String("subsystem", "identity")),
+		SSHPort: sshPort,
 	}
 
 	for {

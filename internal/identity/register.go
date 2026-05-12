@@ -24,6 +24,10 @@ type Pairer struct {
 	// PendingInterval controls how often we re-poll while admin hasn't
 	// approved yet. Defaults to 30s.
 	PendingInterval time.Duration
+
+	// SSHPort is the reverse tunnel port detected from systemd units.
+	// Sent to the server on every register attempt so the panel can display it.
+	SSHPort int
 }
 
 // Wait returns nil when the device has a device_key (either already, or
@@ -43,6 +47,7 @@ func (p *Pairer) Wait(ctx context.Context) error {
 		Hostname:      Hostname(),
 		OSInfo:        osInfoJSON,
 		PlayerVersion: system.Version,
+		SSHPort:       p.SSHPort,
 	}
 
 	p.Log.Info("device unpaired; entering register loop",

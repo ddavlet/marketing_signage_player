@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -29,6 +30,7 @@ type Options struct {
 	DeviceKey KeyProvider
 	Version   string
 	Timeout   time.Duration
+	SSHPort   int
 }
 
 type Client struct {
@@ -37,6 +39,7 @@ type Client struct {
 	deviceKey KeyProvider
 	userAgent string
 	version   string
+	sshPort   int
 }
 
 func New(opts Options) (*Client, error) {
@@ -59,6 +62,7 @@ func New(opts Options) (*Client, error) {
 		deviceKey: opts.DeviceKey,
 		userAgent: "marketing-signage-player/" + opts.Version,
 		version:   opts.Version,
+		sshPort:   opts.SSHPort,
 	}, nil
 }
 
@@ -85,6 +89,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("X-Player-Version", c.version)
 	req.Header.Set("Accept", "application/json")
+	if c.sshPort > 0 {
+		req.Header.Set("X-SSH-Port", strconv.Itoa(c.sshPort))
+	}
 	if rdr != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
