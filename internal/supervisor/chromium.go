@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -67,10 +68,13 @@ func (s *Supervisor) SwitchURL(u string) error {
 	return s.KillCurrent()
 }
 
-// KillCurrent sends SIGINT to the process group of the running Chromium
-// command so that wrapper scripts (e.g. runuser) and all their children
-// (the actual browser) are killed together. Falls back to the process itself
-// if the group signal fails.
+// KillCurrent sends SIGINT to the current Chromium process tree and
+// escalates to SIGKILL after 10 s if the process has not exited.
+//
+// Two-pronged approach: try the process group first (works when Setpgid
+// is effective), then always walk /proc to kill every process in the tree
+// directly. This handles the case where the child wrapper ends up in the
+// parent's PGID instead of its own, which makes the group signal a no-op.
 func (s *Supervisor) KillCurrent() error {
 	s.mu.Lock()
 	cmd := s.current
@@ -78,11 +82,30 @@ func (s *Supervisor) KillCurrent() error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	// Negative PID targets the entire process group (set via Setpgid below).
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGINT); err != nil {
-		return cmd.Process.Signal(os.Interrupt)
-	}
+	pid := cmd.Process.Pid
+	_ = syscall.Kill(-pid, syscall.SIGINT)
+	killTree(pid, syscall.SIGINT)
+	go func() {
+		time.Sleep(10 * time.Second)
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		killTree(pid, syscall.SIGKILL)
+	}()
 	return nil
+}
+
+// killTree sends sig to every process in the subtree rooted at pid.
+// Children are signalled before the parent so they cannot re-spawn.
+// Reads /proc/<pid>/task/<pid>/children (Linux) to discover children.
+func killTree(pid int, sig syscall.Signal) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
+	if err == nil {
+		for _, s := range strings.Fields(string(data)) {
+			if child, err := strconv.Atoi(s); err == nil && child > 0 {
+				killTree(child, sig)
+			}
+		}
+	}
+	_ = syscall.Kill(pid, sig)
 }
 
 // New validates options and detects the Chromium binary if needed.
@@ -140,9 +163,8 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		// signal to the whole group (wrapper script + browser children).
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.Cancel = func() error {
-			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGINT); err != nil {
-				return cmd.Process.Signal(os.Interrupt)
-			}
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
+			killTree(cmd.Process.Pid, syscall.SIGINT)
 			return nil
 		}
 		cmd.WaitDelay = 5 * time.Second
