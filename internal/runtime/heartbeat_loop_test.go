@@ -347,3 +347,57 @@ func TestHeartbeat401_ReturnsUnauthorizedWithoutFallback(t *testing.T) {
 		t.Fatalf("401 must not use heartbeat fallback; got %v", cmd.urls())
 	}
 }
+
+// If the first heartbeat fails for a non-connectivity reason, a later 503 must
+// not trigger fallback (only the first attempt may).
+func TestHeartbeatAfterDecodeErrorSecond503_NoFallback(t *testing.T) {
+	t.Parallel()
+
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/device/heartbeat/" {
+			http.NotFound(w, req)
+			return
+		}
+		n++
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`not-json`))
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("down"))
+	}))
+	t.Cleanup(srv.Close)
+
+	cli, err := api.New(api.Options{
+		BaseURL:   srv.URL,
+		DeviceKey: func() string { return "k" },
+		Timeout:   2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &recordingCommander{}
+	fallback := "file:///tmp/should-not-appear.html"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	_ = heartbeatLoop(ctx, Options{
+		Client:          cli,
+		Commander:       cmd,
+		Log:             quietLog(),
+		DefaultInterval: 20 * time.Millisecond,
+		KioskURL:        "https://panel.example/player/x/",
+		FallbackURL:     fallback,
+	})
+
+	for _, u := range cmd.urls() {
+		if u == fallback {
+			t.Fatalf("503 on second heartbeat must not open fallback after non-connectivity first error; got %v", cmd.urls())
+		}
+	}
+}

@@ -31,14 +31,25 @@ import (
 	"github.com/marketing-signage/player/internal/updater"
 )
 
+// defaultFallbackImage is where install.sh places the downloaded asset when
+// fallback_image is not set in config.toml.
+const defaultFallbackImage = "/etc/marketing-signage/fallback.png"
+
 // fallbackPageURL writes a minimal HTML page that shows the configured logo
 // image full-screen and returns its file:// URL. If no image is configured it
-// returns a data URI that renders a plain black screen.
+// tries defaultFallbackImage when that file exists, otherwise a plain black
+// data: HTML page.
 func fallbackPageURL(cfg config.Snapshot) string {
-	if cfg.FallbackImage == "" {
+	image := strings.TrimSpace(cfg.FallbackImage)
+	if image == "" {
+		if st, err := os.Stat(defaultFallbackImage); err == nil && !st.IsDir() {
+			image = defaultFallbackImage
+		}
+	}
+	if image == "" {
 		return "data:text/html,<html><body style=\"margin:0;background:black\"></body></html>"
 	}
-	if _, err := os.Stat(cfg.FallbackImage); err != nil {
+	if _, err := os.Stat(image); err != nil {
 		return "data:text/html,<html><body style=\"margin:0;background:black\"></body></html>"
 	}
 	html := `<!DOCTYPE html><html><head><style>` +
@@ -46,7 +57,7 @@ func fallbackPageURL(cfg config.Snapshot) string {
 		`body{background:#000;display:flex;align-items:center;justify-content:center;height:100vh}` +
 		`img{max-width:100vw;max-height:100vh;object-fit:contain}` +
 		`</style></head><body>` +
-		`<img src="file://` + cfg.FallbackImage + `">` +
+		`<img src="file://` + image + `">` +
 		`</body></html>`
 
 	path := filepath.Join(cfg.DataDir, "fallback.html")

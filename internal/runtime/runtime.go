@@ -3,11 +3,11 @@
 // so a 401 (key wiped server-side) tears the supervisor down too and we
 // re-enter pairing.
 //
-// Heartbeat-driven fallback (local file:// page) is conservative: we only
-// switch Chromium away from the kiosk URL before the first successful
-// heartbeat, when the panel is clearly unreachable (HTTP 4xx/5xx except 401,
-// or transport errors). After that we assume the browser may be serving
-// cached content and do not interrupt playback on later heartbeat failures.
+// Heartbeat-driven fallback (local file:// page) runs at most once: only
+// when the very first heartbeat fails with connectivity-class errors
+// (transport, 404, 5xx). Later failures only log — Chromium keeps showing
+// the kiosk page and cached content when the panel drops out. 401 always
+// surfaces for re-pair.
 package runtime
 
 import (
@@ -51,7 +51,7 @@ type Options struct {
 	Log             *slog.Logger
 	DefaultInterval time.Duration
 	KioskURL        string // original kiosk URL to restore after fallback
-	FallbackURL     string // local file:// page; see heartbeatLoop comment; empty disables
+	FallbackURL     string // local file:// page; only first failed heartbeat may use it; empty disables
 }
 
 // Run blocks until ctx is cancelled or a subsystem returns a fatal error
@@ -162,13 +162,13 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 
 	canFallback := opts.Commander != nil && opts.FallbackURL != ""
 	inFallback := false
-	hadSuccessfulHeartbeat := false
+	firstHeartbeat := true
 
 	for {
+		isInitialHeartbeat := firstHeartbeat
 		resp, err := opts.Client.Heartbeat(ctx)
 		switch {
 		case err == nil:
-			hadSuccessfulHeartbeat = true
 			if resp.SyncIntervalSeconds > 0 {
 				newInterval := time.Duration(resp.SyncIntervalSeconds) * time.Second
 				if newInterval != interval {
@@ -203,21 +203,21 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 			return err
 
 		default:
-			if canFallback && !hadSuccessfulHeartbeat && heartbeatConnectivityLoss(err) {
-				if !inFallback {
-					inFallback = true
-					opts.Log.Warn("panel unreachable before first successful heartbeat; switching to fallback",
-						slog.String("error", err.Error()))
-					if serr := opts.Commander.SwitchURL(opts.FallbackURL); serr != nil {
-						opts.Log.Warn("switch to fallback failed", slog.String("error", serr.Error()))
-					}
-				} else {
-					opts.Log.Warn("heartbeat failed (in fallback)", slog.String("error", err.Error()))
+			if inFallback {
+				opts.Log.Warn("heartbeat failed (in fallback)", slog.String("error", err.Error()))
+			} else if canFallback && isInitialHeartbeat && heartbeatConnectivityLoss(err) {
+				inFallback = true
+				opts.Log.Warn("panel unreachable on first heartbeat; switching to fallback",
+					slog.String("error", err.Error()))
+				if serr := opts.Commander.SwitchURL(opts.FallbackURL); serr != nil {
+					opts.Log.Warn("switch to fallback failed", slog.String("error", serr.Error()))
 				}
 			} else {
 				opts.Log.Warn("heartbeat failed", slog.String("error", err.Error()))
 			}
 		}
+
+		firstHeartbeat = false
 
 		t := time.NewTimer(interval)
 		select {

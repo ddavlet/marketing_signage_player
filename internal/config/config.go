@@ -21,10 +21,9 @@ type Snapshot struct {
 	LogLevel      string `toml:"log_level"`
 	ChromiumPath  string `toml:"chromium_path"`
 	DataDir       string `toml:"data_dir"`
-	// FallbackImage is an absolute path to a local image file (PNG/JPG/SVG)
-	// used for the offline page shown only until the first successful heartbeat
-	// while the panel is unreachable (see runtime package). Leave empty for a
-	// plain black fallback page.
+	// FallbackImage is an absolute path to a local image (PNG/JPG/SVG) for the
+	// offline fallback page. Leave empty to use /etc/marketing-signage/fallback.png
+	// when that file exists (install.sh), else a plain black page.
 	FallbackImage string `toml:"fallback_image"`
 }
 

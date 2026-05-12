@@ -142,7 +142,8 @@ log "Installed: $BINARY"
 
 mkdir -p "$CONFIG_DIR"
 
-# Download fallback image (shown when the server is unreachable).
+# Download fallback image (first-failed-heartbeat offline page; agent also
+# checks this path when fallback_image is unset in config.toml).
 FALLBACK_IMAGE="${CONFIG_DIR}/fallback.png"
 FALLBACK_IMAGE_URL="${SERVER_URL}/static/player/fallback.png"
 log "Downloading fallback image…"
