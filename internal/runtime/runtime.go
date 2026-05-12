@@ -2,6 +2,12 @@
 // Chromium supervisor concurrently, with cancel-on-first-error semantics
 // so a 401 (key wiped server-side) tears the supervisor down too and we
 // re-enter pairing.
+//
+// Heartbeat-driven fallback (local file:// page) is conservative: we only
+// switch Chromium away from the kiosk URL before the first successful
+// heartbeat, when the panel is clearly unreachable (HTTP 4xx/5xx except 401,
+// or transport errors). After that we assume the browser may be serving
+// cached content and do not interrupt playback on later heartbeat failures.
 package runtime
 
 import (
@@ -45,7 +51,7 @@ type Options struct {
 	Log             *slog.Logger
 	DefaultInterval time.Duration
 	KioskURL        string // original kiosk URL to restore after fallback
-	FallbackURL     string // shown when server returns 401/404; empty disables
+	FallbackURL     string // local file:// page; see heartbeatLoop comment; empty disables
 }
 
 // Run blocks until ctx is cancelled or a subsystem returns a fatal error
@@ -108,6 +114,17 @@ func Run(ctx context.Context, opts Options) error {
 	return ctx.Err()
 }
 
+// heartbeatConnectivityLoss reports errors that mean the panel did not give
+// a usable heartbeat response (excluding 401, which is handled separately).
+func heartbeatConnectivityLoss(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, api.ErrNotFound) ||
+		errors.Is(err, api.ErrHTTPError) ||
+		errors.Is(err, api.ErrTransport)
+}
+
 func dispatchCommands(ctx context.Context, opts Options, cmds []api.Command) {
 	for _, cmd := range cmds {
 		opts.Log.Info("executing command", slog.String("kind", cmd.Kind), slog.Int("id", cmd.ID))
@@ -145,11 +162,13 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 
 	canFallback := opts.Commander != nil && opts.FallbackURL != ""
 	inFallback := false
+	hadSuccessfulHeartbeat := false
 
 	for {
 		resp, err := opts.Client.Heartbeat(ctx)
 		switch {
 		case err == nil:
+			hadSuccessfulHeartbeat = true
 			if resp.SyncIntervalSeconds > 0 {
 				newInterval := time.Duration(resp.SyncIntervalSeconds) * time.Second
 				if newInterval != interval {
@@ -176,11 +195,18 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 				}
 			}
 
-		case errors.Is(err, api.ErrUnauthorized), errors.Is(err, api.ErrNotFound), errors.Is(err, api.ErrHTTPError):
-			if canFallback {
+		case errors.Is(err, api.ErrUnauthorized):
+			// Never substitute the offline image for an auth failure — main clears device_key.
+			return err
+
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return err
+
+		default:
+			if canFallback && !hadSuccessfulHeartbeat && heartbeatConnectivityLoss(err) {
 				if !inFallback {
 					inFallback = true
-					opts.Log.Warn("server unavailable; switching to fallback",
+					opts.Log.Warn("panel unreachable before first successful heartbeat; switching to fallback",
 						slog.String("error", err.Error()))
 					if serr := opts.Commander.SwitchURL(opts.FallbackURL); serr != nil {
 						opts.Log.Warn("switch to fallback failed", slog.String("error", serr.Error()))
@@ -188,17 +214,9 @@ func heartbeatLoop(ctx context.Context, opts Options) error {
 				} else {
 					opts.Log.Warn("heartbeat failed (in fallback)", slog.String("error", err.Error()))
 				}
-			} else if errors.Is(err, api.ErrUnauthorized) {
-				return err // no fallback: surface up so caller can re-pair
 			} else {
 				opts.Log.Warn("heartbeat failed", slog.String("error", err.Error()))
 			}
-
-		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-			return err
-
-		default:
-			opts.Log.Warn("heartbeat failed", slog.String("error", err.Error()))
 		}
 
 		t := time.NewTimer(interval)

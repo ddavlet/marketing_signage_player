@@ -38,18 +38,19 @@ func TestRunRestartsAfterExit(t *testing.T) {
 	bin := helperScript(t, counter)
 
 	sv, err := New(Options{
-		BinaryPath:     bin,
-		KioskURL:       "https://example.test/player/x/",
-		UserDataDir:    t.TempDir(),
-		Log:            quietLogger(),
-		InitialBackoff: 10 * time.Millisecond,
-		MaxBackoff:     20 * time.Millisecond,
+		BinaryPath:            bin,
+		KioskURL:              "https://example.test/player/x/",
+		UserDataDir:           t.TempDir(),
+		Log:                   quietLogger(),
+		InitialBackoff:        10 * time.Millisecond,
+		MaxBackoff:            20 * time.Millisecond,
+		MinRunDurationToReset: 1, // reset backoff every clean exit so restarts stay fast
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	if err := sv.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {

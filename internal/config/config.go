@@ -22,8 +22,9 @@ type Snapshot struct {
 	ChromiumPath  string `toml:"chromium_path"`
 	DataDir       string `toml:"data_dir"`
 	// FallbackImage is an absolute path to a local image file (PNG/JPG/SVG)
-	// shown full-screen when the server returns 401 or 404. Leave empty to
-	// show a plain black screen on server errors.
+	// used for the offline page shown only until the first successful heartbeat
+	// while the panel is unreachable (see runtime package). Leave empty for a
+	// plain black fallback page.
 	FallbackImage string `toml:"fallback_image"`
 }
 

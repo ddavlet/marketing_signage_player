@@ -255,3 +255,95 @@ func TestHeartbeat404_TriggersFallback(t *testing.T) {
 		t.Fatalf("expected first switch to fallback, got %v", got)
 	}
 }
+
+func TestHeartbeatAfterSuccess_DoesNotSwitchToFallbackOn5xx(t *testing.T) {
+	t.Parallel()
+
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/device/heartbeat/" {
+			http.NotFound(w, req)
+			return
+		}
+		n++
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("down"))
+	}))
+	t.Cleanup(srv.Close)
+
+	cli, err := api.New(api.Options{
+		BaseURL:   srv.URL,
+		DeviceKey: func() string { return "k" },
+		Timeout:   2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &recordingCommander{}
+	fallback := "file:///tmp/never-use.html"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	_ = heartbeatLoop(ctx, Options{
+		Client:          cli,
+		Commander:       cmd,
+		Log:             quietLog(),
+		DefaultInterval: 20 * time.Millisecond,
+		KioskURL:        "https://panel.example/player/x/",
+		FallbackURL:     fallback,
+	})
+
+	for _, u := range cmd.urls() {
+		if u == fallback {
+			t.Fatalf("after a successful heartbeat, 5xx must not switch to fallback; got %v", cmd.urls())
+		}
+	}
+}
+
+func TestHeartbeat401_ReturnsUnauthorizedWithoutFallback(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/device/heartbeat/" {
+			http.NotFound(w, req)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+
+	cli, err := api.New(api.Options{
+		BaseURL:   srv.URL,
+		DeviceKey: func() string { return "k" },
+		Timeout:   2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &recordingCommander{}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	err = heartbeatLoop(ctx, Options{
+		Client:          cli,
+		Commander:       cmd,
+		Log:             quietLog(),
+		DefaultInterval: 20 * time.Millisecond,
+		KioskURL:        "https://panel.example/player/x/",
+		FallbackURL:     "file:///tmp/fallback.html",
+	})
+	if !errors.Is(err, api.ErrUnauthorized) {
+		t.Fatalf("want ErrUnauthorized, got %v", err)
+	}
+	if len(cmd.urls()) != 0 {
+		t.Fatalf("401 must not use heartbeat fallback; got %v", cmd.urls())
+	}
+}

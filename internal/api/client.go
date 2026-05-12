@@ -16,6 +16,8 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrNotFound     = errors.New("not found")
 	ErrHTTPError    = errors.New("http error") // wraps any 4xx/5xx not handled specifically
+	// ErrTransport marks failures from http.Client.Do (no TCP response, TLS, timeouts, etc.).
+	ErrTransport = errors.New("transport error")
 )
 
 // KeyProvider is a function so the client can read the latest device key
@@ -94,7 +96,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
+		return fmt.Errorf("%s %s: %w", method, path, errors.Join(ErrTransport, err))
 	}
 	defer resp.Body.Close()
 
