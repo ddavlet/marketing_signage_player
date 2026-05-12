@@ -7,3 +7,4 @@
 .vscode/
 .idea/
 config.local.toml
+.claude/settings.local.json
