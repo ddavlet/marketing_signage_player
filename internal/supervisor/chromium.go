@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -66,8 +67,10 @@ func (s *Supervisor) SwitchURL(u string) error {
 	return s.KillCurrent()
 }
 
-// KillCurrent sends SIGINT to the running Chromium process so it exits and the
-// restart loop immediately relaunches it. No-op if nothing is running.
+// KillCurrent sends SIGINT to the process group of the running Chromium
+// command so that wrapper scripts (e.g. runuser) and all their children
+// (the actual browser) are killed together. Falls back to the process itself
+// if the group signal fails.
 func (s *Supervisor) KillCurrent() error {
 	s.mu.Lock()
 	cmd := s.current
@@ -75,7 +78,11 @@ func (s *Supervisor) KillCurrent() error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	return cmd.Process.Signal(os.Interrupt)
+	// Negative PID targets the entire process group (set via Setpgid below).
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGINT); err != nil {
+		return cmd.Process.Signal(os.Interrupt)
+	}
+	return nil
 }
 
 // New validates options and detects the Chromium binary if needed.
@@ -129,9 +136,15 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 		cmd := exec.CommandContext(ctx, s.opts.BinaryPath, args...)
 		cmd.Env = os.Environ()
-		// Send SIGTERM (instead of the default SIGKILL on macOS/Linux) when
-		// ctx cancels, so Chromium gets a chance to flush state.
-		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+		// Put the child in its own process group so KillCurrent can send a
+		// signal to the whole group (wrapper script + browser children).
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGINT); err != nil {
+				return cmd.Process.Signal(os.Interrupt)
+			}
+			return nil
+		}
 		cmd.WaitDelay = 5 * time.Second
 
 		s.mu.Lock()
